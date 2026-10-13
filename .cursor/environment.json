@@ -1,0 +1,1 @@
+{"install":"bash .cursor/setup.sh","terminals":[{"name":"dev","command":"cd frontend && npx vite"}]}
