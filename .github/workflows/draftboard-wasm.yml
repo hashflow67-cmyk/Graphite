@@ -5,12 +5,17 @@ on:
   push:
     branches:
       - master
+  pull_request:
+    paths:
+      - ".github/workflows/draftboard-wasm.yml"
+      - ".cursor/**"
 
+# Read-only by default; only the publish job gets write access.
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: draftboard-wasm
+  group: draftboard-wasm-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -21,33 +26,40 @@ jobs:
       WASM_BINDGEN_CLI_VERSION: "0.2.121"
       CARGO_ABOUT_VERSION: "0.9.2"
       BINARYEN_VERSION: "130"
+      # sha256 of binaryen-version_130-x86_64-linux.tar.gz (matches the upstream .sha256 file)
+      BINARYEN_SHA256: "0a18362361ad05465118cd8eeb72edaeec89de6894bc283576ef4e07aa3babcc"
       BINSTALL_DISABLE_TELEMETRY: "true"
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
 
       - name: Free disk space
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL || true
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: "24"
 
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
         with:
           toolchain: "1.98"
           target: wasm32-unknown-unknown
           cache: false
           rustflags: ""
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
-      - uses: cargo-bins/cargo-binstall@main
+      - uses: cargo-bins/cargo-binstall@3be4ad2b146f3302f92e5956c54fedbb6ae8cccc # v1.25.3
 
       - name: Install wasm-bindgen-cli, cargo-about, wasm-opt
         run: |
           cargo binstall --no-confirm --force "wasm-bindgen-cli@$WASM_BINDGEN_CLI_VERSION" "cargo-about@$CARGO_ABOUT_VERSION"
+          curl -sSfL -o binaryen.tar.gz "https://github.com/WebAssembly/binaryen/releases/download/version_$BINARYEN_VERSION/binaryen-version_$BINARYEN_VERSION-x86_64-linux.tar.gz"
+          echo "$BINARYEN_SHA256  binaryen.tar.gz" | sha256sum -c -
           mkdir -p "$HOME/.binaryen"
-          curl -sSfL "https://github.com/WebAssembly/binaryen/releases/download/version_$BINARYEN_VERSION/binaryen-version_$BINARYEN_VERSION-x86_64-linux.tar.gz" | tar xz -C "$HOME/.binaryen" --strip-components=1
+          tar xzf binaryen.tar.gz -C "$HOME/.binaryen" --strip-components=1
+          rm binaryen.tar.gz
           echo "$HOME/.binaryen/bin" >> "$GITHUB_PATH"
 
       - name: Build web
@@ -57,13 +69,62 @@ jobs:
 
       - name: Package
         run: |
-          tar czf pkg.tar.gz -C frontend/wrapper/pkg .
-          tar czf dist.tar.gz -C frontend/dist .
-          ls -la pkg.tar.gz dist.tar.gz
+          mkdir -p out
+          tar czf out/pkg.tar.gz -C frontend/wrapper/pkg .
+          tar czf out/dist.tar.gz -C frontend/dist .
+          (cd out && sha256sum pkg.tar.gz dist.tar.gz > SHA256SUMS)
+          cat out/SHA256SUMS
+          ls -la out
 
-      - name: Publish wasm-latest release
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: draftboard-wasm
+          path: out/
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: build
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    concurrency:
+      group: draftboard-wasm-publish
+      cancel-in-progress: false
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: draftboard-wasm
+          path: out
+
+      - name: Verify artifact checksums
+        working-directory: out
+        run: sha256sum -c SHA256SUMS
+
+      # 1) Immutable per-commit release first. 2) Then refresh the rolling wasm-latest assets in place
+      #    (no delete, so wasm-latest is never missing). SHA256SUMS is uploaded last; a reader that
+      #    catches the brief swap sees a checksum mismatch and fails, never a silent bad build.
+      - name: Publish per-commit release, then refresh wasm-latest
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          gh release delete wasm-latest --cleanup-tag -y || true
-          gh release create wasm-latest pkg.tar.gz dist.tar.gz --target "$GITHUB_SHA" --prerelease --title "Draftboard WASM (latest)" --notes "Prebuilt WASM + frontend dist from $GITHUB_SHA"
+          set -euo pipefail
+          TAG="wasm-${GITHUB_SHA::12}"
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" out/pkg.tar.gz out/dist.tar.gz out/SHA256SUMS \
+              --target "$GITHUB_SHA" --prerelease \
+              --title "Draftboard WASM ${GITHUB_SHA::12}" \
+              --notes "Prebuilt WASM + frontend dist from $GITHUB_SHA"
+          fi
+          if gh release view wasm-latest >/dev/null 2>&1; then
+            gh release upload wasm-latest out/pkg.tar.gz out/dist.tar.gz --clobber
+            gh release upload wasm-latest out/SHA256SUMS --clobber
+            gh release edit wasm-latest --notes "Rolling build. Source: $GITHUB_SHA. Immutable copy: $TAG"
+          else
+            gh release create wasm-latest out/pkg.tar.gz out/dist.tar.gz out/SHA256SUMS \
+              --target "$GITHUB_SHA" --prerelease --title "Draftboard WASM (latest)" \
+              --notes "Rolling build. Source: $GITHUB_SHA. Immutable copy: $TAG"
+          fi

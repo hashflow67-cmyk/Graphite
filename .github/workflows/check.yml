@@ -24,7 +24,8 @@ jobs:
   # Build the web app via the shared build workflow
   build:
     needs: skip-check
-    if: needs.skip-check.outputs.skip != 'true'
+    # Upstream-only; skipped on the Draftboard fork
+    if: github.repository == 'GraphiteEditor/Graphite' && (needs.skip-check.outputs.skip != 'true')
     uses: ./.github/workflows/build.yml
     secrets: inherit
     with:
@@ -34,7 +35,8 @@ jobs:
   # Run the Rust tests on the self-hosted native runner
   test:
     needs: skip-check
-    if: needs.skip-check.outputs.skip != 'true'
+    # Upstream-only; skipped on the Draftboard fork
+    if: github.repository == 'GraphiteEditor/Graphite' && (needs.skip-check.outputs.skip != 'true')
     runs-on: [self-hosted, target/native]
     env:
       RUSTC_WRAPPER: /usr/bin/sccache
