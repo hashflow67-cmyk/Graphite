@@ -46,7 +46,8 @@ on:
 
 jobs:
   web:
-    if: github.event_name == 'push' || inputs.web
+    # Upstream-only; skipped on the Draftboard fork
+    if: github.repository == 'GraphiteEditor/Graphite' && (github.event_name == 'push' || inputs.web)
     runs-on: [self-hosted, target/wasm]
     permissions:
       contents: write
@@ -295,7 +296,8 @@ jobs:
             || gh workflow run website.yml --ref master
 
   windows:
-    if: (github.event_name == 'push' && github.ref != 'refs/tags/latest-stable') || inputs.windows
+    # Upstream-only; skipped on the Draftboard fork
+    if: github.repository == 'GraphiteEditor/Graphite' && ((github.event_name == 'push' && github.ref != 'refs/tags/latest-stable') || inputs.windows)
     runs-on: windows-latest
     permissions:
       contents: read
@@ -495,7 +497,8 @@ jobs:
           path: target/artifacts
 
   mac:
-    if: (github.event_name == 'push' && github.ref != 'refs/tags/latest-stable') || inputs.mac
+    # Upstream-only; skipped on the Draftboard fork
+    if: github.repository == 'GraphiteEditor/Graphite' && ((github.event_name == 'push' && github.ref != 'refs/tags/latest-stable') || inputs.mac)
     runs-on: macos-latest
     permissions:
       contents: read
@@ -689,7 +692,8 @@ jobs:
           path: target/artifacts
 
   linux:
-    if: (github.event_name == 'push' && github.ref != 'refs/tags/latest-stable') || inputs.linux
+    # Upstream-only; skipped on the Draftboard fork
+    if: github.repository == 'GraphiteEditor/Graphite' && ((github.event_name == 'push' && github.ref != 'refs/tags/latest-stable') || inputs.linux)
     runs-on: ubuntu-latest
     permissions:
       contents: read
