@@ -22,6 +22,7 @@ env:
 
 jobs:
   build:
+    if: github.repository == 'GraphiteEditor/Graphite' # Upstream-only (self-hosted runners / upstream secrets); skipped on the Draftboard fork
     runs-on: ubuntu-latest
     permissions:
       contents: read

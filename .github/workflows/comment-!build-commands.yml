@@ -23,7 +23,9 @@ jobs:
     # Command should be limited to core team members (those in the organization) for security.
     # From the GitHub Actions docs:
     # author_association = 'MEMBER': Author is a member of the organization that owns the repository.
+    # Upstream-only; skipped on the Draftboard fork
     if: >
+      github.repository == 'GraphiteEditor/Graphite' &&
       github.event.issue.pull_request &&
       github.event.comment.author_association == 'MEMBER' &&
       startsWith(github.event.comment.body, '!build')
